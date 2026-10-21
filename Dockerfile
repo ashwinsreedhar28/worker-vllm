@@ -24,6 +24,11 @@ RUN python3 -m ensurepip --upgrade 2>/dev/null || true \
 # builder/requirements.txt.
 RUN python3 -m pip install --no-cache-dir --no-deps "vllm-bnb-plugin>=0.0.3"
 
+# TEST ONLY (branch test/guard-downgrade, never merged): replace the base
+# image's vLLM the way the vllm-bnb-plugin incident did. The guard below must
+# fail this build.
+RUN python3 -m pip install --no-cache-dir --no-deps "vllm==0.31.0"
+
 # Guard rail: the base image's vLLM must survive our pip installs — fail the
 # build loudly if it changed, and for release tags (vX.Y.Z) if it isn't that
 # release. Nightly, latest and model-named day-0 tags (e.g. step-5-preview)
