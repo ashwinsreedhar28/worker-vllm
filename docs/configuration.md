@@ -90,6 +90,16 @@ cache: each vLLM version, model config and GPU type adds an entry.
 endpoint scaled to zero); vLLM rebuilds it. Set `VLLM_CACHE_ROOT=/root/.cache/vllm` to
 keep the cache in the container.
 
+The Dockerfile also sets `VLLM_ENABLE_STARTUP_PLAN=1`. vLLM then saves the result of
+its GPU memory profiling under `$VLLM_CACHE_ROOT/startup_plan/`, keyed by a fingerprint
+of the vLLM version, the model, cache, parallel and compilation config, the GPU name,
+total memory and compute capability, and the torch/CUDA build. A later cold start with
+the same fingerprint and at least as much free GPU memory skips the profiling pass and
+the CUDA-graph memory estimate; any mismatch falls back to full profiling, so a stale
+plan costs nothing. The plan lives in the same folder as the compile cache and follows
+it when `src/compile_cache.py` falls back to the container. Set
+`VLLM_ENABLE_STARTUP_PLAN=0` on the endpoint to turn it off.
+
 ## Speculative decoding
 
 Pass a full JSON config, which vLLM parses natively:
