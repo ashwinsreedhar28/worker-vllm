@@ -51,12 +51,14 @@ ENV MODEL_NAME=$MODEL_NAME \
     # before. src/compile_cache.py falls back to vLLM's default root if the
     # volume is full or read-only.
     VLLM_CACHE_ROOT="${BASE_PATH}/vllm-cache" \
-    # Also persist vLLM's startup plan (the memory-profiling result) under
-    # VLLM_CACHE_ROOT. Later cold starts skip the profile pass when the plan's
-    # fingerprint (vLLM version, model/cache/parallel/compile config, GPU name,
-    # total memory, compute capability, torch/CUDA build) matches and at least
-    # as much GPU memory is free; otherwise vLLM profiles as before. Measured
-    # 6.9 s -> 2.3 s per cold start for Qwen3-8B on an RTX 4090.
+    # Also persist vLLM's startup plan (the measured KV-cache memory budget)
+    # under VLLM_CACHE_ROOT. A later cold start whose fingerprint (vLLM version,
+    # model/parallel/compile config, GPU name, total memory, compute capability,
+    # torch/CUDA build) matches, with at least as much GPU memory free, skips
+    # the memory measurement and the CUDA-graph memory estimate; it still runs
+    # the profile forward and graph capture. Any mismatch profiles as before.
+    # determine_available_memory 6.9 s -> 2.3 s (median of 3 cold starts,
+    # Qwen3-8B bf16, RTX 4090, vLLM v0.30.0 base).
     VLLM_ENABLE_STARTUP_PLAN=1 \
     HF_HUB_ENABLE_HF_TRANSFER=0 \
     TOKENIZERS_PARALLELISM=false

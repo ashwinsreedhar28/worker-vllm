@@ -90,15 +90,19 @@ cache: each vLLM version, model config and GPU type adds an entry.
 endpoint scaled to zero); vLLM rebuilds it. Set `VLLM_CACHE_ROOT=/root/.cache/vllm` to
 keep the cache in the container.
 
-The Dockerfile also sets `VLLM_ENABLE_STARTUP_PLAN=1`. vLLM then saves the result of
-its GPU memory profiling under `$VLLM_CACHE_ROOT/startup_plan/`, keyed by a fingerprint
-of the vLLM version, the model, cache, parallel and compilation config, the GPU name,
-total memory and compute capability, and the torch/CUDA build. A later cold start with
-the same fingerprint and at least as much free GPU memory skips the profiling pass and
-the CUDA-graph memory estimate; any mismatch falls back to full profiling, so a stale
-plan costs nothing. The plan lives in the same folder as the compile cache and follows
-it when `src/compile_cache.py` falls back to the container. Set
-`VLLM_ENABLE_STARTUP_PLAN=0` on the endpoint to turn it off.
+The Dockerfile also sets `VLLM_ENABLE_STARTUP_PLAN=1`. vLLM (v0.29.0 and later) then saves
+the KV-cache memory budget it measured under `$VLLM_CACHE_ROOT/startup_plan/`, keyed by a
+fingerprint of the vLLM version, the model, parallel and compilation config, the GPU name,
+total memory and compute capability, and the torch/CUDA build. A later cold start with the
+same fingerprint and at least as much free GPU memory reuses that budget and skips the
+memory measurement and the CUDA-graph memory estimate (the profile forward pass and graph
+capture still run); any mismatch falls back to measuring. Plans are looked up and written
+under whatever `VLLM_CACHE_ROOT` is in effect, so after `src/compile_cache.py` falls back
+to the container they go there too; an existing plan on the volume is not copied. Set
+`VLLM_ENABLE_STARTUP_PLAN=0` on the endpoint to turn it off. Known upstream gap: the
+fingerprint does not yet include `gpu_memory_utilization`
+(vllm-project/vllm#60143), so after changing `GPU_MEMORY_UTILIZATION` delete
+`$VLLM_CACHE_ROOT/startup_plan/` or set the variable to `0` until that lands.
 
 ## Speculative decoding
 
