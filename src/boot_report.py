@@ -44,7 +44,7 @@ _PATTERNS: list[tuple[str, "re.Pattern[str]", tuple[Callable[[str], Any], ...]]]
     ("torch_compile_s", re.compile(r"torch\.compile took ([\d.]+) s in total"), (_num,)),
     ("graph_capture", re.compile(r"Graph capturing finished in ([\d.]+) secs?, took ([\d.]+) GiB"), (_num, _num)),
     ("kv_cache_gib", re.compile(r"Available KV cache memory: ([\d.]+) GiB"), (_num,)),
-    ("kv_cache_tokens", re.compile(r"GPU KV cache size: ([\d,]+) tokens"), (_int,)),
+    ("kv_cache_tokens", re.compile(r"KV cache size: ([\d,]+) tokens"), (_int,)),
     ("max_concurrency", re.compile(r"Maximum concurrency for ([\d,]+) tokens per request: ([\d.]+)x"), (_int, _num)),
     ("engine_init_s", re.compile(r"init engine \(profile, create kv cache, warmup model\) took ([\d.]+) s"), (_num,)),
 ]
