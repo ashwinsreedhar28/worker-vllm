@@ -16,6 +16,9 @@ Accepted job input shapes (all under job["input"]):
 3. Legacy shorthand:
        {"prompt": "...", "sampling_params": {...}, "stream": false}
        {"messages": [...], "sampling_params": {...}, "stream": true}
+4. Boot report, for configuration sweeps (only with DAY0_BOOT_REPORT=1):
+       {"day0_boot_report": true}
+   returns {"day0_boot_report": {...}} (see boot_report.py) without calling vLLM.
 
 When the request body has "stream": true, raw SSE chunks are yielded as they
 arrive; otherwise the parsed JSON response is yielded once.
@@ -44,6 +47,9 @@ vllm_process = None
 # (see startup_errors.py). Every job then answers with the cause instead of
 # dialling a server that is not there.
 startup_error: Optional[str] = None
+
+# Set by main.py to the boot_report module when DAY0_BOOT_REPORT=1.
+boot_report = None
 
 _default_model_cache: Optional[str] = None
 
@@ -115,11 +121,19 @@ def _error(message: str, error_type: str = "worker_error") -> dict:
 
 
 async def handler(job: dict) -> AsyncGenerator[Any, None]:
+    job_input = job.get("input") or {}
+
+    # Answered even after a failed start: how the boot went is the point.
+    if isinstance(job_input, dict) and job_input.get("day0_boot_report"):
+        if boot_report is None:
+            yield _error("The boot report is off. Set DAY0_BOOT_REPORT=1 on the endpoint to turn it on.")
+        else:
+            yield {"day0_boot_report": boot_report.report()}
+        return
+
     if startup_error:
         yield _error(startup_error, error_type="startup_error")
         return
-
-    job_input = job.get("input") or {}
 
     try:
         route, method, body = _normalize_job_input(job_input)

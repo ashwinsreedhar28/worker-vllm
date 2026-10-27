@@ -37,6 +37,7 @@ import time
 import urllib.error
 import urllib.request
 
+import boot_report
 import compile_cache
 import model_preflight
 import startup_errors
@@ -89,6 +90,7 @@ def pump_output(proc: subprocess.Popen) -> None:
         sys.stdout.write(line)
         sys.stdout.flush()
         recent_output.append(line)
+        boot_report.observe(line)
 
 
 def start_vllm() -> subprocess.Popen:
@@ -98,6 +100,7 @@ def start_vllm() -> subprocess.Popen:
     argv += build_vllm_args()
 
     logging.info("Starting vLLM: %s", " ".join(redact_argv(argv)))
+    boot_report.note_launch(redact_argv(argv))
     # vLLM's stdout+stderr flow through a pipe so we can both forward them to the
     # worker logs and keep the tail to classify a startup failure. Unbuffered so
     # the child's log lines arrive as they are written, not when its buffer fills.
@@ -143,6 +146,7 @@ def wait_for_vllm(proc: subprocess.Popen) -> None:
             with urllib.request.urlopen(request, timeout=10) as resp:
                 if resp.status == 200:
                     logging.info("vLLM is healthy")
+                    boot_report.note_healthy()
                     return
         except (urllib.error.URLError, ConnectionError, OSError):
             pass
@@ -275,6 +279,7 @@ def main() -> None:
                     "revision."
                 )
                 drop_pinned_revisions()
+                boot_report.note_relaunch("revision")
                 recent_output.clear()
                 continue
             if (
@@ -287,6 +292,7 @@ def main() -> None:
                     "vLLM ran out of disk during startup with its compile cache on "
                     "the network volume. Relaunching once with it in the container."
                 )
+                boot_report.note_relaunch("disk")
                 recent_output.clear()
                 continue
             if (
@@ -300,6 +306,7 @@ def main() -> None:
                     "vLLM ran out of GPU memory during startup. Relaunching once "
                     "with a smaller memory footprint."
                 )
+                boot_report.note_relaunch("oom")
                 recent_output.clear()
                 continue
             startup_error = startup_errors.classify(
@@ -313,6 +320,7 @@ def main() -> None:
             # paying for the download and the load on every attempt and showing the
             # user a traceback instead of a cause, so stay up and answer jobs with it.
             logging.error("vLLM cannot start on this configuration; answering jobs with the cause: %s", startup_error)
+            boot_report.note_startup_error()
 
     # Import here (not at module import time) so the RunPod SDK and handler
     # start only after the backend is confirmed healthy (or confirmed dead).
@@ -321,6 +329,7 @@ def main() -> None:
 
     proxy_handler.vllm_process = vllm_process
     proxy_handler.startup_error = startup_error
+    proxy_handler.boot_report = boot_report if boot_report.ENABLED else None
 
     max_concurrency = int(os.getenv("MAX_CONCURRENCY", "30"))
     runpod.serverless.start(
