@@ -24,6 +24,7 @@ When the request body has "stream": true, raw SSE chunks are yielded as they
 arrive; otherwise the parsed JSON response is yielded once.
 """
 
+import json
 import logging
 import os
 from typing import Any, AsyncGenerator, Optional, Tuple
@@ -172,7 +173,13 @@ async def handler(job: dict) -> AsyncGenerator[Any, None]:
                     async for chunk in resp.content.iter_any():
                         yield chunk.decode("utf-8", errors="replace")
                 else:
-                    yield await resp.json(content_type=None)
+                    raw = await resp.text()
+                    try:
+                        parsed = json.loads(raw) if raw.strip() else None
+                    except ValueError:
+                        # Not JSON (GET /metrics is Prometheus text): pass the text through.
+                        parsed = raw
+                    yield parsed
     except aiohttp.ClientError as e:
         logging.exception("Request to vLLM failed")
         yield _error(f"Request to vLLM failed: {e}")

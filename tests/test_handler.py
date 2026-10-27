@@ -101,3 +101,49 @@ class TestStartupError:
 
         # Falls through to the normal liveness check rather than short-circuiting.
         assert "not running" in outputs[0]["error"]["message"]
+
+
+class TestResponseBodies:
+    """Non-streaming replies: JSON is parsed, anything else comes back as text."""
+
+    @staticmethod
+    def _serve(monkeypatch, routes):
+        import asyncio
+        import socket
+        import threading
+
+        from aiohttp import web
+
+        import handler as handler_module
+
+        app = web.Application()
+        for path, (body, ctype) in routes.items():
+            async def reply(_request, b=body, c=ctype):
+                return web.Response(text=b, content_type=c)
+            app.router.add_get(path, reply)
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        loop = asyncio.new_event_loop()
+        ready = threading.Event()
+
+        async def start():
+            runner = web.AppRunner(app)
+            await runner.setup()
+            await web.SockSite(runner, sock).start()
+            ready.set()
+
+        threading.Thread(target=lambda: (loop.run_until_complete(start()), loop.run_forever()), daemon=True).start()
+        assert ready.wait(5)
+        monkeypatch.setattr(handler_module, "VLLM_BASE_URL", f"http://127.0.0.1:{port}")
+        monkeypatch.setattr(handler_module, "startup_error", None)
+        monkeypatch.setattr(handler_module, "_is_vllm_alive", lambda: True)
+
+    def test_json_route_is_parsed(self, monkeypatch):
+        self._serve(monkeypatch, {"/v1/models": ('{"data": [{"id": "m"}]}', "application/json")})
+        assert _collect({"input": {"route": "/v1/models"}}) == [{"data": [{"id": "m"}]}]
+
+    def test_metrics_text_is_passed_through(self, monkeypatch):
+        text = "# HELP vllm:num_preemptions_total x\nvllm:num_preemptions_total 0.0\n"
+        self._serve(monkeypatch, {"/metrics": (text, "text/plain")})
+        assert _collect({"input": {"route": "/metrics"}}) == [text]
