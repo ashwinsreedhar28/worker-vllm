@@ -19,7 +19,7 @@ import time
 from typing import Any, Callable, Optional
 
 ENABLED = os.getenv("DAY0_BOOT_REPORT", "").strip().lower() in {"1", "true", "yes", "on"}
-REPORT_VERSION = 1
+REPORT_VERSION = 2  # 2: gpu_memory_mib, gpu_devices, compile_cache_fallback
 
 # Close enough to process start for a boot measured in tens of seconds.
 PROCESS_START = time.time()
@@ -61,7 +61,8 @@ _launches: list[dict] = []
 _healthy_at: Optional[float] = None
 _relaunches: list[str] = []
 _startup_error: bool = False
-_gpu: Optional[str] = None
+_cache_fallback: Optional[str] = None
+_gpu: Optional[dict] = None
 
 
 def note_launch(argv: list[str]) -> None:
@@ -107,18 +108,39 @@ def note_startup_error() -> None:
         _startup_error = True
 
 
-def _gpu_name() -> Optional[str]:
+def note_cache_fallback(reason: str) -> None:
+    """The compile cache moved off VLLM_CACHE_ROOT for this start (engine init will be slower)."""
+    global _cache_fallback
+    if ENABLED:
+        _cache_fallback = reason
+
+
+def _smi(*args: str) -> list[str]:
+    try:
+        out = subprocess.run(["nvidia-smi", *args], capture_output=True, text=True, timeout=10, check=False)
+        return [line.strip() for line in out.stdout.splitlines() if line.strip()]
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+
+_UUID = re.compile(r"\s*\(UUID: [^)]*\)")
+
+
+def _gpu_info() -> dict:
+    """GPU name(s), total memory per GPU, and the device list (MIG slices show up here)."""
     global _gpu
     if _gpu is None:
-        try:
-            out = subprocess.run(
-                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                capture_output=True, text=True, timeout=10, check=False,
-            ).stdout.strip().splitlines()
-            _gpu = ", ".join(sorted(set(out))) if out else ""
-        except (OSError, subprocess.SubprocessError):
-            _gpu = ""
-    return _gpu or None
+        rows = [r.split(", ") for r in _smi("--query-gpu=name,memory.total", "--format=csv,noheader,nounits")]
+        names = sorted({r[0] for r in rows if r})
+        mem = []
+        for r in rows:
+            try:
+                mem.append(int(float(r[1])))
+            except (IndexError, ValueError):
+                pass
+        _gpu = {"name": ", ".join(names) or None, "memory_mib": mem,
+                "devices": [_UUID.sub("", line).strip() for line in _smi("-L")]}
+    return _gpu
 
 
 def report() -> dict:
@@ -136,9 +158,13 @@ def report() -> dict:
         else:
             flat[key] = value
     launched = last["at"] if last else None
+    gpu = _gpu_info()
     return {
         "version": REPORT_VERSION,
-        "gpu": _gpu_name(),
+        "gpu": gpu["name"],
+        "gpu_memory_mib": gpu["memory_mib"],
+        "gpu_devices": gpu["devices"],
+        "compile_cache_fallback": _cache_fallback,
         "process_start": PROCESS_START,
         "launches": len(_launches),
         "relaunches": list(_relaunches),

@@ -33,7 +33,8 @@ def enabled(monkeypatch):
     monkeypatch.setattr(boot_report, "_relaunches", [])
     monkeypatch.setattr(boot_report, "_healthy_at", None)
     monkeypatch.setattr(boot_report, "_startup_error", False)
-    monkeypatch.setattr(boot_report, "_gpu", "NVIDIA L40S")
+    monkeypatch.setattr(boot_report, "_cache_fallback", None)
+    monkeypatch.setattr(boot_report, "_gpu", {"name": "NVIDIA L40S", "memory_mib": [46068], "devices": []})
     return boot_report
 
 
@@ -118,3 +119,26 @@ def test_other_jobs_still_get_the_startup_error(monkeypatch):
     monkeypatch.setattr(handler, "startup_error", "cause")
     out = run({"input": {"prompt": "hi"}})
     assert out == [{"error": {"message": "cause", "type": "startup_error", "code": None}}]
+
+
+def test_gpu_info_reads_nvidia_smi_and_drops_uuids(monkeypatch):
+    monkeypatch.setattr(boot_report, "_gpu", None)
+    out = {
+        ("--query-gpu=name,memory.total", "--format=csv,noheader,nounits"):
+            ["NVIDIA RTX PRO 6000 Blackwell Server Edition, 97887"],
+        ("-L",): ["GPU 0: NVIDIA RTX PRO 6000 Blackwell Server Edition (UUID: GPU-1234)",
+                  "  MIG 2g.48gb      Device  0: (UUID: MIG-5678)"],
+    }
+    monkeypatch.setattr(boot_report, "_smi", lambda *a: out[a])
+    info = boot_report._gpu_info()
+    assert info["name"] == "NVIDIA RTX PRO 6000 Blackwell Server Edition"
+    assert info["memory_mib"] == [97887]
+    assert info["devices"] == ["GPU 0: NVIDIA RTX PRO 6000 Blackwell Server Edition", "MIG 2g.48gb      Device  0:"]
+
+
+def test_cache_fallback_is_reported(enabled):
+    boot(enabled)
+    assert enabled.report()["compile_cache_fallback"] is None
+    enabled.note_cache_fallback("not writable")
+    r = enabled.report()
+    assert r["compile_cache_fallback"] == "not writable" and r["gpu_memory_mib"] == [46068]

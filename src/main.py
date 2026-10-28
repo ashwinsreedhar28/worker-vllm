@@ -231,7 +231,9 @@ def main() -> None:
     apply_local_model_args()
     # The compile cache lives on the network volume (Dockerfile); a full or
     # read-only volume would fail the start, so compile in the container instead.
-    compile_cache.ensure_usable()
+    fell_back = compile_cache.ensure_usable()
+    if fell_back:
+        boot_report.note_cache_fallback(fell_back)
 
     if not (os.getenv("MODEL_NAME") or os.getenv("VLLM_CONFIG_FILE") or os.getenv("MODEL")):
         logging.warning("MODEL_NAME is not set; `vllm serve` will fail without a --model argument")
@@ -293,6 +295,7 @@ def main() -> None:
                     "the network volume. Relaunching once with it in the container."
                 )
                 boot_report.note_relaunch("disk")
+                boot_report.note_cache_fallback("out of space during startup")
                 recent_output.clear()
                 continue
             if (
